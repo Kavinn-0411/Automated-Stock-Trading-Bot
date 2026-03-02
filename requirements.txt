@@ -1,0 +1,18 @@
+# Core
+numpy>=1.26,<2.0
+pandas>=2.2,<3.0
+
+# Data
+yfinance>=0.2.40
+
+# ML / DL
+torch>=2.2
+scikit-learn>=1.4
+stable-baselines3>=2.3
+gymnasium>=0.29
+
+# Visualization
+matplotlib>=3.8
+
+# Utilities
+joblib>=1.3
