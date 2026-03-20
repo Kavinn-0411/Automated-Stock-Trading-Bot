@@ -15,9 +15,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 
-# ---------------------------------------------------------------------------
 # 1.  Model
-# ---------------------------------------------------------------------------
 
 class LSTMPricePredictor(nn.Module):
     """
@@ -72,10 +70,7 @@ class LSTMPricePredictor(nn.Module):
         return self.fc(last_hidden)               # (batch, 1)
 
 
-# ---------------------------------------------------------------------------
 # 2.  Dataset
-# ---------------------------------------------------------------------------
-
 class StockSequenceDataset(Dataset):
     """
     Converts a 2-D feature array into overlapping (window, target) pairs.
@@ -101,10 +96,7 @@ class StockSequenceDataset(Dataset):
         y = self.targets[idx + self.window_size]               # scalar
         return x, y
 
-
-# ---------------------------------------------------------------------------
 # 3.  Training utilities
-# ---------------------------------------------------------------------------
 
 def train_one_epoch(
     model: nn.Module,
@@ -152,9 +144,7 @@ def evaluate(
     return total_loss / len(loader.dataset)
 
 
-# ---------------------------------------------------------------------------
 # 4.  End-to-end training loop (callable or __main__)
-# ---------------------------------------------------------------------------
 
 def run_training(
     features: np.ndarray,
@@ -168,6 +158,8 @@ def run_training(
     epochs: int = 50,
     batch_size: int = 64,
     train_ratio: float = 0.8,
+    save_path: str | None = None,
+    verbose: bool = True,
     device: torch.device | None = None,
 ) -> dict:
     """
@@ -177,11 +169,12 @@ def run_training(
     ----------
     features    : (T, F) array of input features
     targets     : (T,) array of prediction targets
+    save_path   : if provided, the best model (by val loss) is saved here
     Other params are hyperparameters with sensible defaults.
 
     Returns
     -------
-    dict with keys: model, train_losses, val_losses, device
+    dict with keys: model, train_losses, val_losses, device, best_epoch, best_val_loss
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -200,6 +193,9 @@ def run_training(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     train_losses, val_losses = [], []
+    best_val_loss = float("inf")
+    best_epoch = 0
+    best_state = None
 
     for epoch in range(1, epochs + 1):
         t_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
@@ -207,20 +203,50 @@ def run_training(
         train_losses.append(t_loss)
         val_losses.append(v_loss)
 
-        if epoch % 10 == 0 or epoch == 1:
+        if v_loss < best_val_loss:
+            best_val_loss = v_loss
+            best_epoch = epoch
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+        if verbose and (epoch % 10 == 0 or epoch == 1):
             print(f"Epoch {epoch:>3}/{epochs}  |  train MSE: {t_loss:.6f}  |  val MSE: {v_loss:.6f}")
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        model.to(device)
+        if verbose:
+            print(f"\nRestored best model from epoch {best_epoch} (val MSE: {best_val_loss:.6f})")
+
+    if save_path is not None:
+        from pathlib import Path
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        checkpoint = {
+            "model_state_dict": model.state_dict(),
+            "input_dim": input_dim,
+            "hidden_dim": hidden_dim,
+            "num_layers": num_layers,
+            "dropout": dropout,
+            "window_size": window_size,
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+        }
+        torch.save(checkpoint, save_path)
+        if verbose:
+            print(f"Model saved to {save_path}")
 
     return {
         "model": model,
         "train_losses": train_losses,
         "val_losses": val_losses,
         "device": device,
+        "best_epoch": best_epoch,
+        "best_val_loss": float(best_val_loss),
     }
 
 
-# ---------------------------------------------------------------------------
 # 5.  Quick smoke-test with synthetic data
-# ---------------------------------------------------------------------------
 
 def _demo():
     """Generate fake data and verify the full pipeline runs end-to-end."""
