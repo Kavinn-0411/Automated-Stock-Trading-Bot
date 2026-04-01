@@ -10,6 +10,29 @@ import numpy as np
 import pandas as pd
 
 
+def buy_and_hold_portfolio_values(
+    close_prices: np.ndarray,
+    initial_balance: float = 10_000.0,
+) -> np.ndarray:
+    """
+    Simulate a Buy-and-Hold strategy from a series of close prices.
+
+    Buy as many shares as possible on day 1, keep leftover cash, then hold.
+    Returns an array of daily portfolio values with shape (n_days,).
+    """
+    prices = np.asarray(close_prices, dtype=float)
+    if prices.ndim != 1:
+        raise ValueError("close_prices must be a 1D array.")
+    if len(prices) == 0:
+        raise ValueError("close_prices cannot be empty.")
+    if prices[0] <= 0:
+        raise ValueError("The first close price must be positive.")
+
+    shares = int(initial_balance // prices[0])
+    cash = float(initial_balance - (shares * prices[0]))
+    return cash + (shares * prices)
+
+
 def cumulative_return(portfolio_values: np.ndarray) -> float:
     """Total return over the evaluation period."""
     return (portfolio_values[-1] / portfolio_values[0]) - 1.0
