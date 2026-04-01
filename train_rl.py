@@ -92,8 +92,10 @@ def run_inference(ticker: str, model_path: Path) -> np.ndarray:
 def save_outputs(ticker: str, portfolio: np.ndarray) -> None:
     PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
 
-    npy_path = PORTFOLIO_DIR / "ppo.npy"
+    npy_path = PORTFOLIO_DIR / f"{ticker}_ppo.npy"
     np.save(npy_path, portfolio)
+    # Back-compat: single-ticker workflows may still load ppo.npy
+    np.save(PORTFOLIO_DIR / "ppo.npy", portfolio)
 
     meta = {
         "ticker": ticker,
@@ -103,12 +105,14 @@ def save_outputs(ticker: str, portfolio: np.ndarray) -> None:
         "initial_balance": INITIAL_BALANCE,
         "final_portfolio_value": float(portfolio[-1]),
         "cumulative_return_pct": round((float(portfolio[-1]) / float(portfolio[0]) - 1.0) * 100, 4),
+        "npy_path": str(npy_path),
     }
-    meta_path = PORTFOLIO_DIR / "ppo_meta.json"
+    meta_path = PORTFOLIO_DIR / f"{ticker}_ppo_meta.json"
     with open(meta_path, "w") as fh:
         json.dump(meta, fh, indent=2)
 
     print(f"Output: Portfolio array -> {npy_path}  shape={portfolio.shape}")
+    print(f"Output: (legacy)         -> {PORTFOLIO_DIR / 'ppo.npy'}")
     print(f"Output: Metadata -> {meta_path}")
     print(f"Output: Final value: ${portfolio[-1]:,.2f}  ({meta['cumulative_return_pct']:+.2f}%)")
 
