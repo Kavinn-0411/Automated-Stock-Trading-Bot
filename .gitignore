@@ -21,8 +21,11 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Model checkpoints
+# Model weights (generic)
 *.pt
 *.pth
-*.zip
+
+# Checkpoint backups only — active model in outputs/models/ is tracked
+outputs/checkpoints/
+
 logs/

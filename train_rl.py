@@ -7,12 +7,12 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from env.trading_env import TradingEnv
 from models.ppo_agent import create_ppo_agent
-import pandas as pd
 
 
 INITIAL_BALANCE = 10_000.0

@@ -16,6 +16,10 @@ project/
 │   └── trading_env.py         # Custom Gymnasium trading environment
 ├── evaluation/
 │   └── metrics.py             # Cumulative Return, Sharpe Ratio, Max Drawdown
+├── outputs/
+│   ├── models/                # Saved PPO model weights + VecNormalize stats
+│   └── portfolios/            # ppo.npy, ppo_meta.json (integration outputs)
+├── train_rl.py                # PPO train + inference end-to-end script
 ├── requirements.txt
 └── README.md
 ```
