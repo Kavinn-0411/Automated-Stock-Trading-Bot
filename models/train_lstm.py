@@ -36,10 +36,18 @@ TARGET_COL = "Close"
 def load_ticker_data(
     ticker: str,
     data_dir: str = "data/processed",
+    target_mode: str = "close",
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Read the normalised train.csv for a ticker and return
     (features, targets) as numpy arrays.
+
+    target_mode
+    -----------
+    "close"  — target is the normalized Close price (original behaviour).
+    "return" — target is the next-day log-return of the *raw* Close price.
+               Features are still the normalized columns from train.csv.
+               The first row is dropped (no prior day for return).
     """
     csv_path = Path(data_dir) / ticker / "train.csv"
     if not csv_path.exists():
@@ -51,6 +59,19 @@ def load_ticker_data(
     df = pd.read_csv(csv_path, index_col="Date", parse_dates=True)
     if TARGET_COL not in df.columns:
         raise ValueError(f"'{TARGET_COL}' column missing from {csv_path}")
+
+    if target_mode == "return":
+        raw_path = Path(data_dir) / ticker / "train_raw.csv"
+        if not raw_path.exists():
+            raise FileNotFoundError(
+                f"{raw_path} not found — needed for return targets"
+            )
+        raw_df = pd.read_csv(raw_path, index_col="Date", parse_dates=True)
+        log_ret = np.log(raw_df["Close"] / raw_df["Close"].shift(1)).values.astype(np.float32)
+        # drop first row (NaN return)
+        features = df.values[1:].astype(np.float32)
+        targets = log_ret[1:]
+        return features, targets
 
     targets = df[TARGET_COL].values.astype(np.float32)
     features = df.values.astype(np.float32)
