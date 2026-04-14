@@ -14,12 +14,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from env.trading_env import TradingEnv
 from models.ppo_agent import create_ppo_agent
 
-
 INITIAL_BALANCE = 10_000.0
 DATA_DIR = Path("data/processed")
-MODEL_DIR = Path("outputs/models")
-CHECKPOINT_DIR = Path("outputs/checkpoints")
-PORTFOLIO_DIR = Path("outputs/portfolios")
 
 
 def _load_split(ticker: str, split: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -33,7 +29,7 @@ def _make_vec_env(df: pd.DataFrame, raw_df: pd.DataFrame) -> DummyVecEnv:
     return DummyVecEnv([lambda: TradingEnv(df, raw_df, initial_balance=INITIAL_BALANCE)])
 
 
-def train_agent(ticker: str, timesteps: int) -> Path:
+def train_agent(ticker: str, timesteps: int, output_dir: Path = Path("outputs")) -> Path:
     train_norm, train_raw = _load_split(ticker, "train")
 
     vec_env = _make_vec_env(train_norm, train_raw)
@@ -42,37 +38,38 @@ def train_agent(ticker: str, timesteps: int) -> Path:
     model = create_ppo_agent(vec_env)
     model.learn(total_timesteps=timesteps, progress_bar=True)
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = MODEL_DIR / f"ppo_{ticker}"
-    vecnorm_path = MODEL_DIR / f"vecnorm_{ticker}.pkl"
+    model_dir = output_dir / "models"
+    checkpoint_dir = output_dir / "checkpoints"
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    save_path = model_dir / f"ppo_{ticker}"
+    vecnorm_path = model_dir / f"vecnorm_{ticker}.pkl"
 
     model.save(str(save_path))
     vec_env.save(str(vecnorm_path))
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    ckpt_model = CHECKPOINT_DIR / f"ppo_{ticker}_{ts}.zip"
-    ckpt_norm = CHECKPOINT_DIR / f"vecnorm_{ticker}_{ts}.pkl"
-    shutil.copy2(str(save_path) + ".zip", ckpt_model)
-    shutil.copy2(str(vecnorm_path), ckpt_norm)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(save_path) + ".zip", checkpoint_dir / f"ppo_{ticker}_{ts}.zip")
+    shutil.copy2(str(vecnorm_path), checkpoint_dir / f"vecnorm_{ticker}_{ts}.pkl")
 
     print(f"\n[train] Model saved    -> {save_path}.zip")
     print(f"[train] VecNorm saved  -> {vecnorm_path}")
-    print(f"[train] Checkpoint     -> {ckpt_model}")
     return save_path
 
 
-def run_inference(ticker: str, model_path: Path) -> np.ndarray:
+def run_inference(ticker: str, output_dir: Path = Path("outputs")) -> np.ndarray:
     test_norm, test_raw = _load_split(ticker, "test")
     n_days = len(test_norm)
 
+    model_dir = output_dir / "models"
     test_vec_env = _make_vec_env(test_norm, test_raw)
-    vecnorm_path = MODEL_DIR / f"vecnorm_{ticker}.pkl"
+    vecnorm_path = model_dir / f"vecnorm_{ticker}.pkl"
     test_vec_env = VecNormalize.load(str(vecnorm_path), test_vec_env)
     test_vec_env.training = False
     test_vec_env.norm_reward = False
 
-    model = PPO.load(str(model_path), device="cpu")
+    model = PPO.load(str(model_dir / f"ppo_{ticker}"), device="cpu")
 
     obs = test_vec_env.reset()
     portfolio: list[float] = [INITIAL_BALANCE]
@@ -89,10 +86,11 @@ def run_inference(ticker: str, model_path: Path) -> np.ndarray:
     return np.array(portfolio, dtype=np.float64)
 
 
-def save_outputs(ticker: str, portfolio: np.ndarray) -> None:
-    PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
+def save_outputs(ticker: str, portfolio: np.ndarray, output_dir: Path = Path("outputs")) -> None:
+    portfolio_dir = output_dir / "portfolios"
+    portfolio_dir.mkdir(parents=True, exist_ok=True)
 
-    npy_path = PORTFOLIO_DIR / "ppo.npy"
+    npy_path = portfolio_dir / f"ppo_{ticker}.npy"
     np.save(npy_path, portfolio)
 
     meta = {
@@ -104,18 +102,16 @@ def save_outputs(ticker: str, portfolio: np.ndarray) -> None:
         "final_portfolio_value": float(portfolio[-1]),
         "cumulative_return_pct": round((float(portfolio[-1]) / float(portfolio[0]) - 1.0) * 100, 4),
     }
-    meta_path = PORTFOLIO_DIR / "ppo_meta.json"
+    meta_path = portfolio_dir / f"ppo_{ticker}_meta.json"
     with open(meta_path, "w") as fh:
         json.dump(meta, fh, indent=2)
 
-    print(f"Output: Portfolio array -> {npy_path}  shape={portfolio.shape}")
-    print(f"Output: Metadata -> {meta_path}")
-    print(f"Output: Final value: ${portfolio[-1]:,.2f}  ({meta['cumulative_return_pct']:+.2f}%)")
+    print(f"[output] {ticker}: ${portfolio[-1]:,.2f}  ({meta['cumulative_return_pct']:+.2f}%)")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train and evaluate a PPO trading agent.")
-    parser.add_argument("--ticker", required=True, help="Ticker symbol must exist in data/processed/")
+    parser.add_argument("--ticker", required=True, help="Ticker symbol (must exist in data/processed/)")
     parser.add_argument(
         "--timesteps",
         type=int,
@@ -127,11 +123,15 @@ def main() -> None:
         action="store_true",
         help="Skip training and load an existing saved model for inference only",
     )
+    parser.add_argument(
+        "--output-dir",
+        default="outputs",
+        help="Root directory for all saved outputs (default: outputs)",
+    )
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
-    model_path = MODEL_DIR / f"ppo_{ticker}"
-    vecnorm_path = MODEL_DIR / f"vecnorm_{ticker}.pkl"
+    output_dir = Path(args.output_dir)
     ticker_data_dir = DATA_DIR / ticker
 
     if not ticker_data_dir.exists():
@@ -141,20 +141,22 @@ def main() -> None:
         )
 
     if not args.skip_train:
-        train_agent(ticker, args.timesteps)
+        train_agent(ticker, args.timesteps, output_dir)
 
-    model_zip = Path(str(model_path) + ".zip")
+    model_zip = output_dir / "models" / f"ppo_{ticker}.zip"
+    vecnorm_path = output_dir / "models" / f"vecnorm_{ticker}.pkl"
+
     if not model_zip.exists():
-        raise FileNotFoundError(
-            f"Model not found at {model_zip}. Train first"
-        )
+        raise FileNotFoundError(f"Model not found at {model_zip}. Train first.")
     if not vecnorm_path.exists():
-        raise FileNotFoundError(
-            f"VecNormalize stats not found at {vecnorm_path}. Train first"
-        )
+        raise FileNotFoundError(f"VecNormalize stats not found at {vecnorm_path}. Train first.")
 
-    portfolio = run_inference(ticker, model_path)
-    save_outputs(ticker, portfolio)
+    portfolio = run_inference(ticker, output_dir)
+    save_outputs(ticker, portfolio, output_dir)
+
+    npy_path = output_dir / "portfolios" / "ppo.npy"
+    np.save(npy_path, portfolio)
+    print(f"[output] Integration file -> {npy_path}")
 
 
 if __name__ == "__main__":

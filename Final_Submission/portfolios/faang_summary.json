@@ -1,0 +1,32 @@
+{
+  "META": {
+    "n_test_days": 494,
+    "initial_balance": 10000.0,
+    "final_portfolio_value": 14350.1,
+    "cumulative_return_pct": 43.501
+  },
+  "AAPL": {
+    "n_test_days": 494,
+    "initial_balance": 10000.0,
+    "final_portfolio_value": 10332.41,
+    "cumulative_return_pct": 3.3241
+  },
+  "AMZN": {
+    "n_test_days": 494,
+    "initial_balance": 10000.0,
+    "final_portfolio_value": 18291.22,
+    "cumulative_return_pct": 82.9122
+  },
+  "NFLX": {
+    "n_test_days": 494,
+    "initial_balance": 10000.0,
+    "final_portfolio_value": 11142.39,
+    "cumulative_return_pct": 11.4239
+  },
+  "GOOGL": {
+    "n_test_days": 494,
+    "initial_balance": 10000.0,
+    "final_portfolio_value": 13137.09,
+    "cumulative_return_pct": 31.3709
+  }
+}

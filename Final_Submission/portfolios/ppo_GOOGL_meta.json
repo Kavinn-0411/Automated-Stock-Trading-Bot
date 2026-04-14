@@ -1,0 +1,9 @@
+{
+  "ticker": "GOOGL",
+  "window_size_used": null,
+  "test_start_index": 0,
+  "n_test_days": 494,
+  "initial_balance": 10000.0,
+  "final_portfolio_value": 13137.087705258185,
+  "cumulative_return_pct": 31.3709
+}

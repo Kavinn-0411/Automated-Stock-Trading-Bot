@@ -1,0 +1,9 @@
+{
+  "ticker": "AAPL",
+  "window_size_used": null,
+  "test_start_index": 0,
+  "n_test_days": 494,
+  "initial_balance": 10000.0,
+  "final_portfolio_value": 10332.413885212123,
+  "cumulative_return_pct": 3.3241
+}
