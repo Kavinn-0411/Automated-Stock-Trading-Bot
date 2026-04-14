@@ -92,6 +92,8 @@ def save_outputs(ticker: str, portfolio: np.ndarray, output_dir: Path = Path("ou
 
     npy_path = portfolio_dir / f"ppo_{ticker}.npy"
     np.save(npy_path, portfolio)
+    # Back-compat: single-ticker workflows may still load ppo.npy
+    np.save(PORTFOLIO_DIR / "ppo.npy", portfolio)
 
     meta = {
         "ticker": ticker,
@@ -101,6 +103,7 @@ def save_outputs(ticker: str, portfolio: np.ndarray, output_dir: Path = Path("ou
         "initial_balance": INITIAL_BALANCE,
         "final_portfolio_value": float(portfolio[-1]),
         "cumulative_return_pct": round((float(portfolio[-1]) / float(portfolio[0]) - 1.0) * 100, 4),
+        "npy_path": str(npy_path),
     }
     meta_path = portfolio_dir / f"ppo_{ticker}_meta.json"
     with open(meta_path, "w") as fh:

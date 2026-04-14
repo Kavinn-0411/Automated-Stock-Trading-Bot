@@ -15,10 +15,14 @@ project/
 ├── env/
 │   └── trading_env.py         # Custom Gymnasium trading environment
 ├── evaluation/
-│   └── metrics.py             # Cumulative Return, Sharpe Ratio, Max Drawdown
+│   ├── metrics.py             # Metrics + Buy-and-Hold helper
+│   ├── harness.py             # Phase 2: validate arrays, compare, plots
+│   ├── baseline.py            # Run Buy-and-Hold on test_raw.csv
+│   ├── lstm_backtest.py       # LSTM heuristic portfolio simulation
+│   └── compare_all.py         # Load strategies + run harness
 ├── outputs/
 │   ├── models/                # Saved PPO model weights + VecNormalize stats
-│   └── portfolios/            # ppo.npy, ppo_meta.json (integration outputs)
+│   └── portfolios/            # <TICKER>_ppo.npy, <TICKER>_ppo_meta.json
 ├── train_rl.py                # PPO train + inference end-to-end script
 ├── requirements.txt
 └── README.md
@@ -102,6 +106,167 @@ For each ticker, the pipeline produces:
 - **Cumulative Return** — total percentage gain over the test period
 - **Sharpe Ratio** — risk-adjusted return (annualized)
 - **Maximum Drawdown** — largest peak-to-trough decline
+
+### Compare all strategies (Buy-and-Hold, LSTM, PPO)
+
+1. Run the data pipeline for your ticker (see above).
+2. Train the LSTM and save a checkpoint (default path `models/saved/<TICKER>_lstm.pkl`):
+
+   ```bash
+   python -m models.train_lstm --ticker AAPL
+   ```
+
+3. Train PPO and write test-set portfolio values:
+
+   ```bash
+   python train_rl.py --ticker AAPL
+   ```
+
+   This saves `outputs/portfolios/<TICKER>_ppo.npy` (and a legacy `ppo.npy`).
+
+4. Run the comparison (table + optional plot):
+
+   ```bash
+   python -m evaluation.compare_all --ticker AAPL
+   ```
+
+   Outputs: `evaluation/outputs/<TICKER>_comparison.csv` and `<TICKER>_comparison.png` (one chart: $ on the left axis, normalized wealth on the right).  
+   If the LSTM checkpoint or PPO file is missing, that strategy is skipped and noted in the log.
+
+   **Phase 2 harness (programmatic use):** if you already have three aligned `numpy` arrays of daily portfolio values, call `evaluation.harness.compare_three_strategies(...)` or `compare_validated_strategies({...})` after optional `trim_to_common_length`. Arrays must be 1-D, equal length, and start within `$1` of each other by default (`StrategyArrayError` otherwise).
+
+---
+
+## PPO trading agent (reinforcement learning)
+
+This component implements a **Proximal Policy Optimization (PPO)** agent that learns to trade a single stock by interacting with a custom **Gymnasium** environment. The agent observes **15** normalized market features plus **3** portfolio scalars each step and chooses **Buy**, **Sell**, or **Hold**. Training uses the chronological train split; evaluation produces a daily portfolio value array compatible with `evaluation.compare_all` and `evaluation.harness`.
+
+### PPO-related files
+
+| File | Description |
+|------|-------------|
+| `env/trading_env.py` | Custom environment — executes trades, tracks portfolio, rewards |
+| `models/ppo_agent.py` | PPO factory (Stable-Baselines3) with tuned hyperparameters |
+| `train_rl.py` | Train, run test inference, save model + portfolio arrays |
+| `outputs/models/ppo_<TICKER>.zip` | Saved policy (after training) |
+| `outputs/models/vecnorm_<TICKER>.pkl` | VecNormalize stats (must pair with the same policy) |
+| `outputs/portfolios/<TICKER>_ppo.npy` | Daily portfolio values on the test window |
+| `outputs/portfolios/<TICKER>_ppo_meta.json` | Metadata (ticker, length, final value, return) |
+| `outputs/portfolios/ppo.npy` | Legacy copy of the last run (do not use for another ticker) |
+
+### PPO dependencies
+
+Install from the root `requirements.txt`. Key packages: `stable-baselines3`, `gymnasium`, `numpy`, `pandas`, `torch`.
+
+### Running PPO
+
+**Prerequisite:** run the data pipeline for your ticker first:
+
+```bash
+python -m data.data_pipeline --tickers AAPL
+```
+
+**Option A — Inference only (if a trained model already exists)**
+
+```bash
+python train_rl.py --ticker AAPL --skip-train
+```
+
+**Option B — Train (examples)**
+
+```bash
+# Shorter run
+python train_rl.py --ticker AAPL --timesteps 500000
+
+# Longer run (higher quality, more wall time)
+python train_rl.py --ticker AAPL --timesteps 2000000
+```
+
+Checkpoints are also written under `outputs/checkpoints/` when training completes.
+
+**Another ticker**
+
+```bash
+python -m data.data_pipeline --tickers MSFT
+python train_rl.py --ticker MSFT --timesteps 2000000
+```
+
+### Environment design (`env/trading_env.py`)
+
+**Observation (18 dimensions):**  
+`[Open, High, Low, Close, Volume, RSI, MACD, MACD_Signal, MACD_Hist, SMA_7, SMA_21, SMA_50, EMA_7, EMA_21, EMA_50, current_balance, shares_held, net_worth]`  
+
+- First **15** features: normalized market columns from the data pipeline.  
+- Last **3**: live portfolio state (VecNormalize may further scale observations at runtime).
+
+**Actions**
+
+| Action | Index | Behaviour |
+|--------|-------|-----------|
+| Hold | 0 | No trade |
+| Buy | 1 | Invest all cash in shares (with fee) |
+| Sell | 2 | Liquidate all shares (with fee) |
+
+**Reward:** `(net_worth_t - net_worth_{t-1}) / initial_balance` (normalized step return).
+
+**Fees:** 0.1% on buys and sells (consistent with common RL finance benchmarks, e.g. Yang et al., 2020).
+
+**Episode end:** last row of data, or net worth ≤ 0.
+
+### Agent design (`models/ppo_agent.py`)
+
+PPO with **MlpPolicy**; training often uses **VecNormalize** (`norm_obs=True`, `norm_reward=False`, `clip_obs=10.0`). Example tuned settings (see source for current defaults):
+
+| Hyperparameter | Example value | Note |
+|----------------|---------------|------|
+| Policy network | e.g. [256, 256] | Larger than SB3 default [64, 64] for tabular features |
+| Learning rate | e.g. 1e-4 | May be reduced vs 3e-4 to limit policy oscillation |
+| n_steps | 2048 | Rollout length |
+| batch_size | 64 | |
+| n_epochs | 10 | |
+| gamma | 0.99 | |
+| gae_lambda | 0.95 | |
+| clip_range | 0.2 | |
+
+### Training notes (example ablations)
+
+| Stage | Timesteps | Notes |
+|-------|-----------|--------|
+| Early / debugging | 500k | Faster iteration |
+| Stronger fit | 2M | Often better test behavior before overfitting |
+| Very long | 5M+ | Risk of overfitting to the training trajectory |
+
+*Exact numbers depend on seed, ticker, and data range.*
+
+### Output contract (integration with evaluation)
+
+`outputs/portfolios/<TICKER>_ppo.npy` is a **1-D** `float` array of **daily portfolio value** on the test split (length = number of test rows from `train_rl` inference loop). Use the **same initial balance** as Buy-and-Hold / LSTM when running `evaluation.compare_all`, or the harness will reject mismatched day-0 values.
+
+Recommended end-to-end comparison:
+
+```bash
+python -m evaluation.compare_all --ticker AAPL
+```
+
+Programmatic merge with other strategies (arrays must be aligned and same starting capital):
+
+```python
+from evaluation.harness import compare_validated_strategies
+import numpy as np
+
+results = {
+    "PPO": np.load("outputs/portfolios/AAPL_ppo.npy"),
+    # LSTM / Buy-and-Hold: produce via evaluation pipeline or teammates’ scripts
+}
+summary = compare_validated_strategies(results)
+print(summary)
+```
+
+### Relation to literature (Yang et al., 2020)
+
+Inspired by *Deep Reinforcement Learning for Automated Stock Trading: An Ensemble Strategy* (ICAIF ’20): MDP framing, PPO, technical indicators, transaction costs, and evaluation via cumulative return, Sharpe, and max drawdown. This repo uses a **single-asset** setup and does not implement their full ensemble or turbulence index; reward normalization and VecNormalize are practical additions for stable value-function learning.
+
+---
 
 ## Tech Stack
 

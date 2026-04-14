@@ -1,9 +1,7 @@
 """
 Quantitative evaluation metrics for comparing trading strategies.
 
-TODO (Prakash):
-  - Hook these into the evaluation harness that runs each model
-    on the test set and produces a comparison table / plots.
+For validated multi-strategy comparison and charts, see ``evaluation.harness``.
 """
 
 import numpy as np
