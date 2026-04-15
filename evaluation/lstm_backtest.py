@@ -71,18 +71,47 @@ def simulate_lstm_heuristic_portfolio(
         raise FileNotFoundError(f"LSTM checkpoint not found: {ckpt_path}")
 
     import torch
-    from models.predict_test_lstm import inverse_close_column, load_model, predict_test_set
+    from models.predict_test_lstm import (
+        inverse_close_column,
+        load_model,
+        predict_test_set,
+        predict_test_set_returns,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, ckpt = load_model(str(ckpt_path), device)
     window_size = int(ckpt["window_size"])
+    target_mode = ckpt.get("target_mode", "close")
 
-    preds_norm, actual_norm, _dates = predict_test_set(
-        model, train_norm, test_norm, window_size, device
-    )
-    price_scaler = scalers["price"]
-    pred_dollar = inverse_close_column(preds_norm, price_scaler)
-    actual_dollar = inverse_close_column(actual_norm, price_scaler)
+    ticker_id = None
+    if ckpt.get("multi_ticker"):
+        ticker_map = ckpt.get("ticker_to_idx") or {
+            t: i for i, t in enumerate(ckpt["tickers"])
+        }
+        if ticker not in ticker_map:
+            raise KeyError(
+                f"Ticker {ticker!r} not in checkpoint; trained on: {ckpt['tickers']}"
+            )
+        ticker_id = int(ticker_map[ticker])
+
+    if target_mode == "return":
+        _pred_ret, _actual_ret, pred_dollar, actual_dollar, _dates = predict_test_set_returns(
+            model,
+            train_norm,
+            test_norm,
+            train_raw,
+            test_raw,
+            window_size,
+            device,
+            ticker_id=ticker_id,
+        )
+    else:
+        preds_norm, actual_norm, _dates = predict_test_set(
+            model, train_norm, test_norm, window_size, device, ticker_id=ticker_id
+        )
+        price_scaler = scalers["price"]
+        pred_dollar = inverse_close_column(preds_norm, price_scaler)
+        actual_dollar = inverse_close_column(actual_norm, price_scaler)
 
     close_prices = test_raw["Close"].to_numpy(dtype=np.float64)
     n = len(close_prices)

@@ -1,4 +1,4 @@
 Strategy,Cumulative Return,Sharpe Ratio,Max Drawdown
-Buy-and-Hold,25.70%,1.072,22.94%
-LSTM (heuristic),25.08%,1.162,22.99%
-PPO,32.62%,2.344,9.41%
+Buy-and-Hold,90.84%,1.662,16.58%
+LSTM (heuristic),3.02%,1.174,0.10%
+PPO,3.32%,0.218,13.49%

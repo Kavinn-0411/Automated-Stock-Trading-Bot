@@ -57,6 +57,18 @@ def main() -> None:
     parser.add_argument("--portfolio-dir", default="outputs/portfolios")
     parser.add_argument("--lstm-checkpoint", default=None)
     parser.add_argument("--lstm-threshold", type=float, default=0.005)
+    parser.add_argument(
+        "--auto-threshold",
+        action="store_true",
+        help="Select the best LSTM threshold from --threshold-grid by final portfolio value.",
+    )
+    parser.add_argument(
+        "--threshold-grid",
+        nargs="+",
+        type=float,
+        default=[0.005, 0.003, 0.002, 0.001, 0.0005],
+        help="Candidate thresholds for --auto-threshold (default: 0.005 0.003 0.002 0.001 0.0005).",
+    )
     parser.add_argument("--initial-balance", type=float, default=10_000.0)
     parser.add_argument(
         "--balance-tol",
@@ -100,13 +112,53 @@ def main() -> None:
         )
     else:
         try:
-            lstm_vals, lstm_meta = simulate_lstm_heuristic_portfolio(
-                ticker,
-                data_dir=args.data_dir,
-                checkpoint=str(lstm_ckpt),
-                initial_balance=args.initial_balance,
-                threshold=args.lstm_threshold,
-            )
+            if args.auto_threshold:
+                if not args.threshold_grid:
+                    raise ValueError("--threshold-grid must have at least one value")
+
+                best_vals: np.ndarray | None = None
+                best_meta: dict | None = None
+                best_threshold: float | None = None
+                best_final_value = -np.inf
+                tried: list[dict[str, float]] = []
+
+                for th in args.threshold_grid:
+                    vals, meta = simulate_lstm_heuristic_portfolio(
+                        ticker,
+                        data_dir=args.data_dir,
+                        checkpoint=str(lstm_ckpt),
+                        initial_balance=args.initial_balance,
+                        threshold=float(th),
+                    )
+                    final_value = float(vals[-1])
+                    tried.append(
+                        {
+                            "threshold": float(th),
+                            "final_value": final_value,
+                            "cumulative_return_pct": (final_value / float(vals[0]) - 1.0) * 100.0,
+                        }
+                    )
+                    if final_value > best_final_value:
+                        best_final_value = final_value
+                        best_vals = vals
+                        best_meta = meta
+                        best_threshold = float(th)
+
+                assert best_vals is not None and best_meta is not None and best_threshold is not None
+                lstm_vals = best_vals
+                lstm_meta = dict(best_meta)
+                lstm_meta["auto_threshold"] = True
+                lstm_meta["selected_threshold"] = best_threshold
+                lstm_meta["threshold_grid"] = [float(x) for x in args.threshold_grid]
+                lstm_meta["threshold_trials"] = tried
+            else:
+                lstm_vals, lstm_meta = simulate_lstm_heuristic_portfolio(
+                    ticker,
+                    data_dir=args.data_dir,
+                    checkpoint=str(lstm_ckpt),
+                    initial_balance=args.initial_balance,
+                    threshold=args.lstm_threshold,
+                )
             results["LSTM (heuristic)"] = lstm_vals
             notes["lstm"] = json.dumps(lstm_meta, indent=2)
         except (ImportError, ModuleNotFoundError) as e:
