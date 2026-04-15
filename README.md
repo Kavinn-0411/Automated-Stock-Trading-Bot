@@ -7,23 +7,28 @@ An automated stock trading system that compares a **Reinforcement Learning (PPO)
 ```
 project/
 ├── data/
-│   ├── data_pipeline.py      # Download, indicators, normalize, split
-│   └── processed/             # Generated CSV outputs (git-ignored)
+│   ├── data_pipeline.py          # Download, indicators, normalize, split
+│   └── processed/                # Generated CSV outputs (git-ignored)
 ├── models/
-│   ├── lstm_model.py          # LSTM next-day price predictor
-│   └── ppo_agent.py           # PPO trading agent (Stable-Baselines3)
+│   ├── lstm_model.py             # LSTM architectures (single + multi-ticker)
+│   ├── train_lstm.py             # Single-ticker LSTM training script
+│   ├── train_lstm_multi.py       # Multi-ticker pooled LSTM training script
+│   ├── predict_test_lstm.py      # Test-set prediction & metrics
+│   ├── ppo_agent.py              # PPO factory (Stable-Baselines3)
+│   └── saved/                    # LSTM checkpoints (.pkl) + loss curves
 ├── env/
-│   └── trading_env.py         # Custom Gymnasium trading environment
+│   └── trading_env.py            # Custom Gymnasium trading environment
 ├── evaluation/
-│   ├── metrics.py             # Metrics + Buy-and-Hold helper
-│   ├── harness.py             # Phase 2: validate arrays, compare, plots
-│   ├── baseline.py            # Run Buy-and-Hold on test_raw.csv
-│   ├── lstm_backtest.py       # LSTM heuristic portfolio simulation
-│   └── compare_all.py         # Load strategies + run harness
+│   ├── metrics.py                # Metrics + Buy-and-Hold helper
+│   ├── harness.py                # Validate arrays, compare, plots
+│   ├── baseline.py               # Run Buy-and-Hold on test_raw.csv
+│   ├── lstm_backtest.py          # LSTM heuristic portfolio simulation
+│   └── compare_all.py            # Three-way comparison (B&H, LSTM, PPO)
 ├── outputs/
-│   ├── models/                # Saved PPO model weights + VecNormalize stats
-│   └── portfolios/            # <TICKER>_ppo.npy, <TICKER>_ppo_meta.json
-├── train_rl.py                # PPO train + inference end-to-end script
+│   ├── models/                   # Saved PPO model weights + VecNormalize stats
+│   └── portfolios/               # <TICKER>_ppo.npy, <TICKER>_ppo_meta.json
+├── train_rl.py                   # PPO train + inference end-to-end script
+├── train_faang.py                # Train PPO on all FAANG + generate charts
 ├── requirements.txt
 └── README.md
 ```
@@ -137,6 +142,105 @@ For each ticker, the pipeline produces:
 
 ---
 
+## LSTM price forecaster (supervised learning)
+
+The LSTM component predicts next-day closing prices using a multi-ticker architecture trained jointly on all FAANG stocks. Predictions are converted to trading signals via a threshold-based heuristic.
+
+### LSTM-related files
+
+| File | Description |
+|------|-------------|
+| `models/lstm_model.py` | Model classes: `LSTMPricePredictor`, `MultiTickerLSTMPricePredictor`, `TemporalAttention` |
+| `models/train_lstm.py` | Single-ticker training script and data loading utilities |
+| `models/train_lstm_multi.py` | Multi-ticker pooled LSTM training script (used for latest model) |
+| `models/predict_test_lstm.py` | Test-set predictions and error metrics (MSE, MAE, RMSE) |
+| `evaluation/lstm_backtest.py` | Heuristic portfolio simulation from LSTM predictions |
+| `evaluation/compare_lstm_vs_baseline.py` | LSTM vs Buy-and-Hold directional comparison |
+| `models/saved/multi_lstm.pkl` | Trained multi-ticker checkpoint |
+| `models/saved/multi_lstm_loss_curve.png` | Training/validation loss curve |
+
+### Step 1: Prepare the data
+
+Download and preprocess FAANG data (skip if already done):
+
+```bash
+python -m data.data_pipeline --preset faang
+```
+
+### Step 2: Train the multi-ticker LSTM
+
+```bash
+python -m models.train_lstm_multi \
+    --tickers META AAPL AMZN NFLX GOOGL \
+    --target close \
+    --window-size 45 \
+    --hidden-dim 64 \
+    --embedding-dim 16 \
+    --dropout 0.3 \
+    --lr 5e-4 \
+    --weight-decay 1e-4 \
+    --grad-clip 1.0 \
+    --epochs 80 \
+    --patience 15 \
+    --batch-size 64
+```
+
+This saves the checkpoint to `models/saved/multi_lstm.pkl` and the loss curve to `models/saved/multi_lstm_loss_curve.png`. Training will stop early if validation loss does not improve for 15 consecutive epochs.
+
+To train with log-return targets instead of normalized close prices, change `--target close` to `--target return`.
+
+### Step 3: Evaluate predictions on the test set
+
+```bash
+python -m models.predict_test_lstm --ticker AAPL --checkpoint models/saved/multi_lstm.pkl
+```
+
+This prints MSE, MAE, and RMSE in both normalized and dollar scales. Add `--output-csv predictions.csv` to save per-day predicted vs actual values.
+
+Run for all FAANG tickers:
+
+```bash
+for t in META AAPL AMZN NFLX GOOGL; do
+    python -m models.predict_test_lstm --ticker "$t" --checkpoint models/saved/multi_lstm.pkl
+done
+```
+
+### Step 4: Run the heuristic backtest
+
+Compare the LSTM heuristic strategy against Buy-and-Hold and PPO:
+
+```bash
+python -m evaluation.compare_all \
+    --ticker AAPL \
+    --lstm-checkpoint models/saved/multi_lstm.pkl \
+    --auto-threshold
+```
+
+The `--auto-threshold` flag tests multiple signal thresholds (0.5%, 0.3%, 0.2%, 0.1%, 0.05%) and picks the one that maximizes final portfolio value. Results are saved to `evaluation/outputs/AAPL_comparison.csv` and `AAPL_comparison.png`.
+
+Run across all FAANG:
+
+```bash
+for t in META AAPL AMZN NFLX GOOGL; do
+    python -m evaluation.compare_all \
+        --ticker "$t" \
+        --lstm-checkpoint models/saved/multi_lstm.pkl \
+        --auto-threshold
+done
+```
+
+### Training a single-ticker LSTM (alternative)
+
+If you prefer a per-ticker model instead of the shared multi-ticker model:
+
+```bash
+python -m models.train_lstm --ticker AAPL --epochs 50 --hidden-dim 128
+```
+
+This saves to `models/saved/AAPL_lstm.pkl`. The comparison scripts will auto-detect single-ticker checkpoints when you omit `--lstm-checkpoint`.
+
+---
+
 ## PPO trading agent (reinforcement learning)
 
 This component implements a **Proximal Policy Optimization (PPO)** agent that learns to trade a single stock by interacting with a custom **Gymnasium** environment. The agent observes **15** normalized market features plus **3** portfolio scalars each step and chooses **Buy**, **Sell**, or **Hold**. Training uses the chronological train split; evaluation produces a daily portfolio value array compatible with `evaluation.compare_all` and `evaluation.harness`.
@@ -189,6 +293,16 @@ Checkpoints are also written under `outputs/checkpoints/` when training complete
 ```bash
 python -m data.data_pipeline --tickers MSFT
 python train_rl.py --ticker MSFT --timesteps 2000000
+```
+**Train all FAANG tickers at once (saves to Final_Submission/)**
+```bash
+python -m data.data_pipeline --preset faang
+python train_faang.py --timesteps 2000000
+```
+
+**Skip training, regenerate charts/portfolios from saved models**
+```bash
+python train_faang.py --skip-train
 ```
 
 ### Environment design (`env/trading_env.py`)

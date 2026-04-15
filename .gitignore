@@ -29,3 +29,6 @@ Thumbs.db
 outputs/checkpoints/
 
 logs/
+
+# One-off report generation scripts
+scripts/generate_hyperparam_table.py
