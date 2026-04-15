@@ -138,6 +138,16 @@ For each ticker, the pipeline produces:
    Outputs: `evaluation/outputs/<TICKER>_comparison.csv` and `<TICKER>_comparison.png` (one chart: $ on the left axis, normalized wealth on the right).  
    If the LSTM checkpoint or PPO file is missing, that strategy is skipped and noted in the log.
 
+   **Helper script (multi-ticker):**
+   ```bash
+   scripts/run_compare_all.sh
+   ```
+   This runs `evaluation.compare_all` for `META,AAPL,AMZN,NFLX,GOOGL` with defaults:
+   - `--lstm-checkpoint models/saved/multi_lstm.pkl`
+   - `--portfolio-dir Final_Submission/portfolios`
+   - `--balance-tol 15`
+   - `--auto-threshold`
+
    **Phase 2 harness (programmatic use):** if you already have three aligned `numpy` arrays of daily portfolio values, call `evaluation.harness.compare_three_strategies(...)` or `compare_validated_strategies({...})` after optional `trim_to_common_length`. Arrays must be 1-D, equal length, and start within `$1` of each other by default (`StrategyArrayError` otherwise).
 
 ---
@@ -221,12 +231,20 @@ The `--auto-threshold` flag tests multiple signal thresholds (0.5%, 0.3%, 0.2%, 
 Run across all FAANG:
 
 ```bash
-for t in META AAPL AMZN NFLX GOOGL; do
-    python -m evaluation.compare_all \
-        --ticker "$t" \
-        --lstm-checkpoint models/saved/multi_lstm.pkl \
-        --auto-threshold
-done
+scripts/run_compare_all.sh
+```
+
+Customize the script (examples):
+
+```bash
+# Only a subset of tickers
+scripts/run_compare_all.sh --tickers-csv "AAPL,AMZN"
+
+# Override paths and disable auto-threshold
+scripts/run_compare_all.sh \
+  --lstm-checkpoint models/saved/multi_lstm.pkl \
+  --portfolio-dir Final_Submission/portfolios \
+  --no-auto-threshold -- --lstm-threshold 0.001
 ```
 
 ### Training a single-ticker LSTM (alternative)
